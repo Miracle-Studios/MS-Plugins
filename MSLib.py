@@ -19,6 +19,7 @@
 >>==================================================================<<
 """
 import copy
+from email.mime import text
 import json
 import zlib
 import inspect
@@ -34,6 +35,17 @@ from html.parser import HTMLParser
 from struct import unpack
 from contextlib import suppress
 from typing import List, Callable, Optional, Any, Union, Dict, Tuple
+
+# Импорт get_origin и get_args с фоллбэком для Chaquopy
+try:
+    from typing import get_origin, get_args
+except ImportError:
+    # Фоллбэк для старых версий Python или Chaquopy
+    def get_origin(tp):
+        return getattr(tp, '__origin__', None)
+    
+    def get_args(tp):
+        return getattr(tp, '__args__', ())
 
 from ui.bulletin import BulletinHelper as _BulletinHelper
 from ui.settings import Header, Switch, Input, Text, Divider
@@ -69,7 +81,7 @@ __name__ = "MSLib"
 __description__ = " MSLib - powerful utility library for exteraGram plugins with integrated plugins"
 __icon__ = "ByMiraclePersona/3"
 __author__ = "@Imrcle"
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 __min_version__ = "11.12.0"
 
 
@@ -622,6 +634,13 @@ class Locales:
         "success": "Success",
         "info": "Info",
         
+        # AutoUpdater
+        "autoupdater_header": "AutoUpdater",
+        "enable_autoupdater": "Enable AutoUpdater",
+        "autoupdater_hint": "Automatically check for plugin updates",
+        "autoupdate_timeout": "Update check interval (seconds)",
+        "autoupdate_timeout_hint": "Time between update checks",
+        
         # Интегрированные плагины
         "plugins_header": "Integrated Plugins",
         "hashtags_fix": "HashTags Fix",
@@ -638,6 +657,13 @@ class Locales:
         "error": "Ошибка",
         "success": "Успешно",
         "info": "Информация",
+        
+        # AutoUpdater
+        "autoupdater_header": "Автообновление",
+        "enable_autoupdater": "Включить автообновление",
+        "autoupdater_hint": "Автоматически проверять обновления плагинов",
+        "autoupdate_timeout": "Интервал проверки обновлений (секунды)",
+        "autoupdate_timeout_hint": "Время между проверками обновлений",
         
         # Интегрированные плагины
         "plugins_header": "Интегрированные плагины",
@@ -964,9 +990,47 @@ class AutoUpdater:
         self.logger.info("Force stopped.")
     
     def check_for_updates(self):
-       self.logger.info("Checking for updates...")
-        # Здесь должна быть реализация проверки обновлений
-        # через Telegram API
+        """Проверяет обновления для всех зарегистрированных задач"""
+        self.logger.info("Checking for updates...")
+        
+        for task in self.tasks:
+            try:
+                self._check_task_for_update(task)
+            except Exception as e:
+                self.logger.error(f"Error checking update for {task.plugin_id}: {format_exc()}")
+    
+    def _check_task_for_update(self, task: UpdaterTask):
+        """Проверяет обновление для конкретной задачи"""
+        def get_message_callback(msg):
+            if not msg:
+                self.logger.warning(f"Failed to get message for {task.plugin_id}")
+                return
+            
+            # Проверяем, изменилось ли сообщение
+            cache_key = f"{task.channel_id}_{task.message_id}"
+            cached_edit_date = self.msg_edited_ts_cache.content.get(cache_key, 0)
+            current_edit_date = msg.edit_date if msg.edit_date != 0 else msg.date
+            
+            if current_edit_date <= cached_edit_date:
+                self.logger.info(f"No updates for {task.plugin_id}")
+                return
+            
+            # Обновление доступно
+            self.logger.info(f"Update available for {task.plugin_id}: {cached_edit_date} -> {current_edit_date}")
+            
+            # Скачиваем и устанавливаем
+            download_and_install_plugin(msg, task)
+            
+            # Обновляем кеш
+            self.msg_edited_ts_cache.content[cache_key] = current_edit_date
+            self.msg_edited_ts_cache.write()
+        
+        # Получаем сообщение через Requests
+        Requests.get_message(
+            task.channel_id,
+            task.message_id,
+            callback=lambda msg, error: get_message_callback(msg) if not error else None
+        )
     
     def is_task_already_present(self, task: UpdaterTask) -> bool:
         """Проверяет, есть ли уже такая задача"""
@@ -1014,6 +1078,123 @@ class AutoUpdater:
         """Принудительно запускает проверку обновлений"""
         self.logger.info("Forced update check was requested.")
         self.forced_update_check = True
+
+
+# ==================== Вспомогательные функции AutoUpdater ====================
+def download_and_install_plugin(message, plugin_task: UpdaterTask, max_retries: int = 3):
+    """Скачивает и устанавливает плагин из сообщения"""
+    if not message or not hasattr(message, 'media'):
+        logger.error(f"Invalid message for plugin {plugin_task.plugin_id}")
+        return
+    
+    media = message.media
+    if not hasattr(media, 'document'):
+        logger.error(f"No document in message for {plugin_task.plugin_id}")
+        return
+    
+    document = media.document
+    
+    # Получаем имя файла
+    filename = None
+    for attr in arraylist_to_list(document.attributes):
+        if isinstance(attr, TLRPC.TL_documentAttributeFilename):
+            filename = attr.file_name
+            break
+    
+    if not filename:
+        logger.error(f"No filename in document for {plugin_task.plugin_id}")
+        return
+    
+    logger.info(f"Downloading plugin update: {filename}")
+    
+    # Путь для сохранения
+    if not PLUGINS_DIRECTORY:
+        logger.error("PLUGINS_DIRECTORY not initialized")
+        return
+    
+    plugin_path = os.path.join(PLUGINS_DIRECTORY, filename)
+    
+    # Функция скачивания
+    def download_with_retry(retry_count=0):
+        def on_download_complete(file_path):
+            if file_path and os.path.exists(file_path):
+                try:
+                    # Копируем в папку плагинов
+                    import shutil
+                    shutil.copy2(file_path, plugin_path)
+                    logger.info(f"Plugin {plugin_task.plugin_id} updated successfully: {plugin_path}")
+                    
+                    # Показываем уведомление
+                    BulletinHelper.show_success(
+                        f"Plugin {plugin_task.plugin_id} updated to version from {filename}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to install plugin {plugin_task.plugin_id}: {format_exc()}")
+                    if retry_count < max_retries:
+                        logger.info(f"Retrying download ({retry_count + 1}/{max_retries})...")
+                        download_with_retry(retry_count + 1)
+            else:
+                logger.error(f"Download failed for {plugin_task.plugin_id}")
+                if retry_count < max_retries:
+                    logger.info(f"Retrying download ({retry_count + 1}/{max_retries})...")
+                    download_with_retry(retry_count + 1)
+        
+        # Используем FileLoader для скачивания
+        try:
+            from client_utils import get_file_loader
+            file_loader = get_file_loader(UserConfig.selectedAccount)
+            
+            # Загружаем файл
+            file_loader.loadFile(
+                document,
+                None,  # parentObject
+                0,     # priority
+                0      # cacheType
+            )
+            
+            # Получаем путь к файлу через FileLoader.getPathToAttach
+            file_path = file_loader.getPathToAttach(document, False).getAbsolutePath()
+            on_download_complete(file_path)
+        except Exception as e:
+            logger.error(f"Download error for {plugin_task.plugin_id}: {format_exc()}")
+            if retry_count < max_retries:
+                logger.info(f"Retrying download ({retry_count + 1}/{max_retries})...")
+                download_with_retry(retry_count + 1)
+    
+    download_with_retry()
+
+
+def get_plugin(plugin_id: str):
+    """Получает экземпляр плагина по ID"""
+    try:
+        from plugin_manager import PluginManager
+        return PluginManager.get_instance().get_plugin(plugin_id)
+    except Exception as e:
+        logger.error(f"Failed to get plugin {plugin_id}: {format_exc()}")
+        return None
+
+
+def add_autoupdater_task(plugin_id: str, channel_id: int, message_id: int):
+    """Добавляет задачу автообновления для плагина"""
+    global autoupdater
+    if not autoupdater:
+        logger.warning("AutoUpdater is not initialized")
+        return
+    
+    task = UpdaterTask(plugin_id, channel_id, message_id)
+    autoupdater.add_task(task)
+    logger.info(f"Added autoupdate task for {plugin_id}: channel={channel_id}, message={message_id}")
+
+
+def remove_autoupdater_task(plugin_id: str):
+    """Удаляет задачу автообновления для плагина"""
+    global autoupdater
+    if not autoupdater:
+        logger.warning("AutoUpdater is not initialized")
+        return
+    
+    autoupdater.remove_task_by_id(plugin_id)
+    logger.info(f"Removed autoupdate task for {plugin_id}")
 
 
 # ==================== Requests утилиты ====================
@@ -1069,6 +1250,32 @@ class Requests:
                 callback(chats[0] if chats else None, error)
         
         Requests.send(request, chat_callback, account)
+    
+    @staticmethod
+    def get_message(channel_id: int, message_id: int, callback: Callable, account: int = 0):
+        """Получает сообщение из канала"""
+        request = TLRPC.TL_channels_getMessages()
+        
+        # Создаем InputChannel
+        input_channel = TLRPC.TL_inputChannel()
+        input_channel.channel_id = abs(channel_id)
+        input_channel.access_hash = 0  # Нужен для приватных каналов
+        request.channel = input_channel
+        
+        # Создаем список ID сообщений
+        request.id = ArrayList()
+        input_message = TLRPC.TL_inputMessageID()
+        input_message.id = message_id
+        request.id.add(input_message)
+        
+        def message_callback(response, error):
+            if error or not response:
+                callback(None, error)
+            else:
+                messages = arraylist_to_list(response.messages) if hasattr(response, 'messages') else []
+                callback(messages[0] if messages else None, error)
+        
+        Requests.send(request, message_callback, account)
 
 
 # ==================== Утилиты для UI ====================
@@ -1298,7 +1505,6 @@ class SingletonMeta(type):
 autoupdater: Optional[AutoUpdater] = None
 
 
-# ==================== Основной класс библиотеки ====================
 class MSLib(BasePlugin):
     strings = {
         "en": {
@@ -1362,16 +1568,12 @@ class MSLib(BasePlugin):
             autoupdater = AutoUpdater()
             autoupdater.run()
             logger.info("AutoUpdater started")
+
+            MSLIB_UPDATE_CHANNEL_ID = 1001234567890
+            MSLIB_UPDATE_MESSAGE_ID = 63
             
-            # Добавляем автообновление для самой MSLib
-            # Канал: https://t.me/MSLib_Project
-            # Сообщение с файлом MSLib.plugin
-            mslib_channel_id = self.get_setting("mslib_update_channel", 0)
-            mslib_message_id = self.get_setting("mslib_update_message", 0)
-            
-            if mslib_channel_id and mslib_message_id:
-                add_autoupdater_task(__id__, mslib_channel_id, mslib_message_id)
-                logger.info(f"MSLib self-update enabled: channel={mslib_channel_id}, message={mslib_message_id}")
+            add_autoupdater_task(__id__, MSLIB_UPDATE_CHANNEL_ID, MSLIB_UPDATE_MESSAGE_ID)
+            logger.info(f"MSLib self-update enabled: channel={MSLIB_UPDATE_CHANNEL_ID}, message={MSLIB_UPDATE_MESSAGE_ID}")
         
         # Инициализация интегрированных плагинов
         self._setup_integrated_plugins()
@@ -1464,13 +1666,6 @@ class MSLib(BasePlugin):
                 default=False,
                 icon="msg_autodownload"
             ),
-            Input(
-                key="autoupdate_timeout",
-                text=localise("autoupdate_timeout"),
-                subtext=localise("autoupdate_timeout_hint"),
-                default="600",
-                icon="msg_timer"
-            ),
 
             Divider(),
             Header(text=localise("plugins_header")),
@@ -1501,7 +1696,6 @@ class MSLib(BasePlugin):
         ]
 
 
-# ==================== Экспорт публичного API ====================
 __all__ = [
     # Основной класс
     'MSLib',
@@ -1545,6 +1739,10 @@ __all__ = [
     'AutoUpdater',
     'UpdaterTask',
     'autoupdater',
+    'download_and_install_plugin',
+    'get_plugin',
+    'add_autoupdater_task',
+    'remove_autoupdater_task',
     
     # Requests
     'Requests',

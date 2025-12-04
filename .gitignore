@@ -30,3 +30,7 @@ Thumbs.db
 *.o
 *.so
 *.plugin
+MSLib_Example_v2.3.plugin.py
+MSLib_Example.plugin.py
+MSLIB_CHANGELOG_v2.3.0.md
+MSLIB_CHANGELOG_v2.2.0.md

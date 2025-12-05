@@ -1,3 +1,5 @@
+<img src="https://i.ibb.co/PvN5Q0Zt/MS-TEAM-1.png" align="left">
+
 # MSLib Documentation
 
 Welcome to the **MSLib** documentation! MSLib is a powerful utility library for exteraGram plugin development that provides a comprehensive set of tools for building feature-rich Telegram plugins.

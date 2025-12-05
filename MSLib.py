@@ -71,7 +71,7 @@ __id__ = "mslib"
 __description__ = "Безкрутая либа"
 __icon__ = "MSMainPack/0"
 __author__ = "@Imrcle"
-__version__ = "1.1.0"
+__version__ = "1.1.0-beta"
 __min_version__ = "12.0.0"
 
 

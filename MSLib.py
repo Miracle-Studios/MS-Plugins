@@ -27,6 +27,7 @@ import logging
 import os
 import os.path
 import sys
+import time
 import threading
 import traceback
 import re
@@ -39,10 +40,11 @@ from typing import List, Callable, Optional, Any, Union, Dict, Tuple, get_origin
 from ui.bulletin import BulletinHelper as _BulletinHelper
 from ui.settings import Header, Switch, Input, Text, Divider
 from ui.alert import AlertDialogBuilder
-from base_plugin import BasePlugin, HookResult, MethodHook
+from base_plugin import BasePlugin, HookResult, MethodHook, HookStrategy
 from android_utils import log as _log, run_on_ui_thread
 from client_utils import (get_messages_controller, get_last_fragment,
-                          send_request, get_account_instance, send_message)
+                          send_request, get_account_instance, send_message,
+                          get_file_loader, run_on_queue)
 
 from java import cast, dynamic_proxy, jint, jarray, jclass
 from java.util import Locale, ArrayList
@@ -51,8 +53,9 @@ from java.io import File
 from org.telegram.tgnet import TLRPC, TLObject
 from org.telegram.ui import ChatActivity
 from org.telegram.messenger import (R, Utilities, AndroidUtilities, ApplicationLoader,
-                                    LocaleController, MessageObject, UserConfig, AccountInstance)
+                                    LocaleController, MessageObject, UserConfig, AccountInstance, FileLoader)
 from org.telegram.ui.ActionBar import Theme
+from com.exteragram.messenger.plugins import PluginsController
 from android.text import SpannableStringBuilder, Spanned, InputType
 from android.view import Gravity, View
 from android.widget import LinearLayout, FrameLayout, TextView
@@ -94,6 +97,10 @@ MSLIB_GLOBAL_PREMIUM = 2
 DEFAULT_AUTOUPDATE_TIMEOUT = "600"  # 10 минут
 DEFAULT_DISABLE_TIMESTAMP_CHECK = False
 DEFAULT_DEBUG_MODE = False
+
+# Автообновление MSLib
+MSLIB_AUTOUPDATE_CHANNEL_ID = 1003314084396
+MSLIB_AUTOUPDATE_MSG_ID = 3
 
 
 def _init_constants():
@@ -317,12 +324,29 @@ class Markdown:
     @staticmethod
     def parse(text: str) -> Tuple[str, List[RawEntity]]:
         """Парсит Markdown текст в Telegram сущности"""
-        # Упрощенная реализация - можно расширить
+        # Базовая реализация - поддержка основных тегов
         entities = []
         clean_text = text
+        offset_shift = 0
         
-        # Здесь должна быть полная реализация Markdown парсера
-        # Для краткости оставляем базовую версию
+        # Парсинг bold **text**
+        import re
+        for match in re.finditer(r'\*\*(.+?)\*\*', text):
+            entities.append(RawEntity(
+                TLEntityType.BOLD,
+                match.start() - offset_shift,
+                len(match.group(1))
+            ))
+            clean_text = clean_text.replace(match.group(0), match.group(1), 1)
+            offset_shift += 4
+        
+        # Парсинг italic *text*
+        for match in re.finditer(r'(?<!\*)\*([^*]+)\*(?!\*)', clean_text):
+            entities.append(RawEntity(
+                TLEntityType.ITALIC,
+                match.start(),
+                len(match.group(1))
+            ))
         
         return add_surrogates(clean_text), entities
     
@@ -343,7 +367,7 @@ class Markdown:
             if entity.type == TLEntityType.BOLD:
                 result.append(f"**{content}**")
             elif entity.type == TLEntityType.ITALIC:
-                result.append(f"_{content}_")
+                result.append(f"*{content}*")
             elif entity.type == TLEntityType.UNDERLINE:
                 result.append(f"__{content}__")
             elif entity.type == TLEntityType.STRIKETHROUGH:
@@ -356,6 +380,8 @@ class Markdown:
                 result.append(f"[{content}]({entity.extra})")
             elif entity.type == TLEntityType.SPOILER:
                 result.append(f"||{content}||")
+            else:
+                result.append(content)
             
             last_offset = entity.offset + entity.length
         
@@ -774,9 +800,12 @@ class Locales:
         "error": "Error",
         "success": "Success",
         "info": "Info",
+        "commands_header": "Commands",
+        "command_prefix_label": "Command prefix",
+        "command_prefix_hint": "Symbol used to trigger commands (e.g., . ! /)",
         "autoupdater_header": "AutoUpdater",
         "enable_autoupdater": "Enable AutoUpdater",
-        "autoupdater_hint": "Automatically check for plugin updates",
+        "autoupdater_hint": "Automatically check for updates (MSLib + plugins using it)",
         "force_update_check": "Force update check",
         "autoupdate_timeout": "Update check interval (seconds)",
         "autoupdate_timeout_title": "Update check interval",
@@ -803,6 +832,8 @@ class Locales:
         "no_call_confirmation_disabled": "No Call Confirmation disabled",
         "old_bottom_forward_enabled": "Old Bottom Forward enabled",
         "old_bottom_forward_disabled": "Old Bottom Forward disabled",
+        "update_check_started": "Update check started!",
+        "autoupdater_not_initialized": "AutoUpdater is not initialized",
     }
     ru = {
         "copy_button": "Копировать",
@@ -811,9 +842,12 @@ class Locales:
         "error": "Ошибка",
         "success": "Успешно",
         "info": "Информация",
+        "commands_header": "Команды",
+        "command_prefix_label": "Префикс команд",
+        "command_prefix_hint": "Символ для вызова команд (например, . ! /)",
         "autoupdater_header": "Автообновление",
         "enable_autoupdater": "Включить автообновление",
-        "autoupdater_hint": "Автоматически проверять обновления плагинов",
+        "autoupdater_hint": "Автоматически проверять обновления (MSLib + плагины)",
         "force_update_check": "Принудительная проверка",
         "autoupdate_timeout": "Интервал проверки обновлений (секунды)",
         "autoupdate_timeout_title": "Интервал проверки обновлений",
@@ -840,6 +874,8 @@ class Locales:
         "no_call_confirmation_disabled": "Без подтверждения звонка выключено",
         "old_bottom_forward_enabled": "Старая пересылка включена",
         "old_bottom_forward_disabled": "Старая пересылка выключена",
+        "update_check_started": "Проверка обновлений запущена!",
+        "autoupdater_not_initialized": "AutoUpdater не инициализирован",
     }
     default = en
 
@@ -852,6 +888,8 @@ def localise(key: str) -> str:
         return locale_dict.get(key, key)
     except:
         return key
+
+
 class CacheFile:
     """Класс для работы с файлами кеша"""
     
@@ -1024,6 +1062,12 @@ class Callback5(dynamic_proxy(Utilities.Callback5)):
             logger.error(f"Ошибка в Callback5: {format_exc()}")
 
 
+# ==================== Утилиты для работы с текстом ====================
+def escape_html(text: str) -> str:
+    """Экранирует HTML специальные символы"""
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 # ==================== Работа с буфером обмена ====================
 def copy_to_clipboard(text: str, show_bulletin: bool = True) -> bool:
     """Копирует текст в буфер обмена"""
@@ -1143,42 +1187,85 @@ class AutoUpdater:
     def cycle(self):
         """Цикл проверки обновлений"""
         event = threading.Event()
-        event.wait(5)
+        event.wait(5)  # Начальная задержка 5 секунд
         
         while not self.forced_stop:
             try:
-                if self.forced_update_check:
-                    self.check_for_updates(show_notifications=True)
-                    self.forced_update_check = False
-                else:
-                    timeout = self.get_timeout_time()
-                    event.wait(timeout)
-                    if not self.forced_stop:
-                        self.check_for_updates(show_notifications=False)
+                self.check_for_updates(show_notifications=False)
+                
+                # Ожидание до следующей проверки с проверкой forced_update_check каждую секунду
+                start_time = time.time()
+                timeout = self.get_timeout_time()
+                
+                while (time.time() - start_time) < timeout:
+                    event.wait(1)  # Ждем 1 секунду
+                    
+                    # Проверяем флаг принудительной проверки
+                    if self.forced_update_check:
+                        self.logger.info("Forced update check requested, checking immediately...")
+                        self.check_for_updates(show_notifications=True)
+                        self.forced_update_check = False
+                    
+                    # Проверяем, не остановлен ли поток
+                    if self.forced_stop:
+                        break
+                    
+                    # Если прошло достаточно времени, выходим из цикла ожидания
+                    if (time.time() - start_time) >= timeout:
+                        break
+                        
+            except KeyboardInterrupt:
+                self.logger.info("Received keyboard interrupt, stopping...")
+                break
             except Exception as e:
-                self.logger.error(f"Error in update cycle: {format_exc()}")
-                event.wait(60)
+                self.logger.error(f"Exception in cycle: {format_exc_only(e)}")
+                # Ждем минуту перед повторной попыткой при ошибке
+                if not self.forced_stop:
+                    event.wait(60)
         
         self.thread = None
         self.logger.info("Force stopped.")
     
     def check_for_updates(self, show_notifications: bool = False):
         """Проверяет обновления для всех зарегистрированных задач"""
-        self.logger.info("Checking for updates...")
+        self.logger.info(f"Checking for updates... (notifications: {show_notifications})")
         
-        for task in self.tasks:
+        # Копируем список задач для предотвращения RuntimeError при модификации во время итерации
+        for task in list(self.tasks):
             try:
+                # Проверяем существование плагина
+                plugin = get_plugin(task.plugin_id)
+                
+                if plugin is None:
+                    self.logger.info(f"Plugin {task.plugin_id} not found. Removing task...")
+                    self.remove_task(task)
+                    continue
+                
+                if not plugin.isEnabled():
+                    self.logger.info(f"Plugin {task.plugin_id} is disabled. Skipping update check...")
+                    continue
+                
+                self.logger.info(f"Checking update for task {task.plugin_id}...")
                 self._check_task_for_update(task, show_notifications)
+                
             except Exception as e:
-                self.logger.error(f"Error checking update for {task.plugin_id}: {format_exc()}")
+                self.logger.error(f"Error checking update for {task.plugin_id}: {format_exc_only(e)}")
     
     def _check_task_for_update(self, task: UpdaterTask, show_notifications: bool = False):
         """Проверяет обновление для конкретной задачи"""
         def get_message_callback(msg):
-            if not msg:
-                self.logger.warning(f"Failed to get message for {task.plugin_id}")
+            if not msg or isinstance(msg, TLRPC.TL_messageEmpty):
+                self.logger.warning(f"Message not found for {task.plugin_id}. Removing task...")
                 if show_notifications:
-                    InnerBulletinHelper("MSLib").show_error(f"Update check failed for {task.plugin_id}")
+                    InnerBulletinHelper("MSLib").show_error(f"Update check failed: message not found for {task.plugin_id}")
+                self.remove_task(task)
+                return
+            
+            if not msg.media:
+                self.logger.warning(f"Message has no media for {task.plugin_id}. Removing task...")
+                if show_notifications:
+                    InnerBulletinHelper("MSLib").show_error(f"Update check failed: no document for {task.plugin_id}")
+                self.remove_task(task)
                 return
             
             # Проверяем настройку disable_timestamp_check
@@ -1209,14 +1296,14 @@ class AutoUpdater:
                 if show_notifications:
                     InnerBulletinHelper("MSLib").show_info(f"Forcing update for {task.plugin_id}")
             
-            # Скачиваем и устанавливаем
-            download_and_install_plugin(msg, task, show_notifications)
+            # Скачиваем и устанавливаем (передаем plugin_id, а не весь объект task)
+            run_on_queue(lambda: download_and_install_plugin(msg, task.plugin_id))
         
-        # Получаем сообщение через Requests
+        # Получаем сообщение через Requests (используем отрицательный channel_id для каналов)
         Requests.get_message(
-            task.channel_id,
+            -task.channel_id,
             task.message_id,
-            callback=lambda msg, error: get_message_callback(msg) if not error else None
+            callback=lambda msg, process_task=task: get_message_callback(msg)
         )
     
     def is_task_already_present(self, task: UpdaterTask) -> bool:
@@ -1263,106 +1350,76 @@ class AutoUpdater:
             self.logger.error(f"Failed to get timeout: {format_exc_only(e)}")
             return int(DEFAULT_AUTOUPDATE_TIMEOUT)
     
-    def force_update_checkk(self):
+    def force_update_check(self):
         """Принудительно запускает проверку обновлений"""
         self.logger.info("Forced update check was requested.")
         self.forced_update_check = True
 
 
 # ==================== Вспомогательные функции AutoUpdater ====================
-def download_and_install_plugin(message, plugin_task: UpdaterTask, max_retries: int = 3, show_notifications: bool = False):
-    """Скачивает и устанавливает плагин из сообщения"""
-    if not message or not hasattr(message, 'media'):
-        logger.error(f"Invalid message for plugin {plugin_task.plugin_id}")
-        if show_notifications:
-            InnerBulletinHelper("MSLib").show_error(f"Invalid message for {plugin_task.plugin_id}")
-        return
+def download_and_install_plugin(msg, plugin_id: str, max_tries: int = 10, is_queued: bool = False, current_try: int = 0):
+    """Скачивает и устанавливает плагин из сообщения (как в zwyLib)"""
     
-    media = message.media
-    if not hasattr(media, 'document'):
-        logger.error(f"No document in message for {plugin_task.plugin_id}")
-        return
+    def plugin_install_error(arg):
+        """Обработчик ошибок установки плагина"""
+        if arg is None:
+            return
+        logger.error(f"Error installing {plugin_id}: {arg}")
+        InnerBulletinHelper("MSLib").show_error(f"Error installing {plugin_id}. Check logs.")
     
-    document = media.document
-    
-    # Получаем имя файла
-    filename = None
-    for attr in arraylist_to_list(document.attributes):
-        if isinstance(attr, TLRPC.TL_documentAttributeFilename):
-            filename = attr.file_name
-            break
-    
-    if not filename:
-        logger.error(f"No filename in document for {plugin_task.plugin_id}")
-        return
-    
-    logger.info(f"Downloading plugin update: {filename}")
-    
-    # Путь для сохранения
-    if not PLUGINS_DIRECTORY:
-        logger.error("PLUGINS_DIRECTORY not initialized")
-        return
-    
-    plugin_path = os.path.join(PLUGINS_DIRECTORY, filename)
-    
-    # Функция скачивания
-    def download_with_retry(retry_count=0):
-        def on_download_complete(file_path):
-            if file_path and os.path.exists(file_path):
-                try:
-                    # Копируем в папку плагинов
-                    import shutil
-                    shutil.copy2(file_path, plugin_path)
-                    logger.info(f"Plugin {plugin_task.plugin_id} updated successfully: {plugin_path}")
-                    
-                    # Показываем уведомление
-                    BulletinHelper.show_success(
-                        f"Plugin {plugin_task.plugin_id} updated to version from {filename}"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to install plugin {plugin_task.plugin_id}: {format_exc()}")
-                    if retry_count < max_retries:
-                        logger.info(f"Retrying download ({retry_count + 1}/{max_retries})...")
-                        download_with_retry(retry_count + 1)
-            else:
-                logger.error(f"Download failed for {plugin_task.plugin_id}")
-                if retry_count < max_retries:
-                    logger.info(f"Retrying download ({retry_count + 1}/{max_retries})...")
-                    download_with_retry(retry_count + 1)
+    try:
+        file_loader = get_file_loader()
+        plugins_controller = PluginsController.getInstance()
+        document = msg.media.getDocument()
+        path = file_loader.getPathToAttach(document, True)
         
-        # Используем FileLoader для скачивания
-        try:
-            from client_utils import get_file_loader
-            file_loader = get_file_loader(UserConfig.selectedAccount)
+        # Проверяем, скачан ли файл
+        if not path.exists():
+            if is_queued:
+                logger.info(f"Waiting 1s for {plugin_id} file to download ({current_try}/{max_tries})...")
+            else:
+                logger.info(f"Starting download of {plugin_id} plugin file...")
             
-            # Загружаем файл
-            file_loader.loadFile(
-                document,
-                None,  # parentObject
-                0,     # priority
-                0      # cacheType
+            # Запускаем загрузку
+            file_loader.loadFile(document, msg, FileLoader.PRIORITY_NORMAL, 1)
+            
+            # Проверяем лимит попыток
+            if current_try >= max_tries:
+                logger.error(f"Max tries reached for {plugin_id}, installation aborted.")
+                InnerBulletinHelper("MSLib").show_error(f"Failed to download {plugin_id}")
+                return
+            
+            # Повторная попытка через 1 секунду
+            run_on_queue(
+                lambda: download_and_install_plugin(msg, plugin_id, max_tries, True, current_try + 1),
+                delay=1
             )
-            
-            # Получаем путь к файлу через FileLoader.getPathToAttach
-            file_path = file_loader.getPathToAttach(document, False).getAbsolutePath()
-            on_download_complete(file_path)
-        except Exception as e:
-            logger.error(f"Download error for {plugin_task.plugin_id}: {format_exc()}")
-            if retry_count < max_retries:
-                logger.info(f"Retrying download ({retry_count + 1}/{max_retries})...")
-                download_with_retry(retry_count + 1)
-    
-    download_with_retry()
+            return
+        
+        logger.info(f"Installing {plugin_id}...")
+        
+        # Пытаемся установить плагин
+        try:
+            # Новый API с 3 аргументами
+            plugins_controller.loadPluginFromFile(str(path), None, Callback1(plugin_install_error))
+        except TypeError:
+            # Старый API с 2 аргументами
+            plugins_controller.loadPluginFromFile(str(path), Callback1(plugin_install_error))
+        
+        logger.info(f"Plugin {plugin_id} installed successfully")
+        InnerBulletinHelper("MSLib").show_success(f"{plugin_id} updated successfully!")
+        
+    except AttributeError as e:
+        logger.error(f"AttributeError in download_and_install_plugin for {plugin_id}: {format_exc_only(e)}")
+        InnerBulletinHelper("MSLib").show_error(f"Invalid message format for {plugin_id}")
+    except Exception as e:
+        logger.error(f"Error in download_and_install_plugin for {plugin_id}: {format_exc()}")
+        InnerBulletinHelper("MSLib").show_error(f"Failed to install {plugin_id}: {format_exc_only(e)}")
 
 
 def get_plugin(plugin_id: str):
     """Получает экземпляр плагина по ID"""
-    try:
-        from plugin_manager import PluginManager
-        return PluginManager.get_instance().get_plugin(plugin_id)
-    except Exception as e:
-        logger.error(f"Failed to get plugin {plugin_id}: {format_exc()}")
-        return None
+    return PluginsController.getInstance().plugins.get(plugin_id)
 
 
 def add_autoupdater_task(plugin_id: str, channel_id: int, message_id: int):
@@ -1609,6 +1666,74 @@ class Requests:
         Requests.send(request, callback, account)
 
 
+# ==================== Системные утилиты ====================
+def runtime_exec(cmd: List[str], return_list_lines: bool = False, raise_errors: bool = True) -> Union[List[str], str]:
+    """Выполняет системную команду через Runtime.exec"""
+    from java.lang import Runtime
+    from java.io import BufferedReader, InputStreamReader, IOException
+    
+    result = []
+    process = None
+    reader = None
+    try:
+        process = Runtime.getRuntime().exec(cmd)
+        reader = BufferedReader(InputStreamReader(process.getInputStream()))
+        line = reader.readLine()
+        while line is not None:
+            result.append(str(line))
+            line = reader.readLine()
+    except IOException as e:
+        if raise_errors:
+            raise e
+        logger.error(f"IOException in runtime_exec: {format_exc_only(e)}")
+    except Exception as e:
+        if raise_errors:
+            raise e
+        logger.error(f"Error in runtime_exec: {format_exc()}")
+    finally:
+        if reader:
+            try:
+                reader.close()
+            except:
+                pass
+        if process:
+            try:
+                process.destroy()
+            except:
+                pass
+    
+    return result if return_list_lines else "\n".join(result)
+
+
+def get_logs(__id__: Optional[str] = None, times: Optional[int] = None, lvl: Optional[str] = None, as_list: bool = False) -> Union[List[str], str]:
+    """Получает логи из logcat
+    
+    Args:
+        __id__: ID плагина для фильтрации
+        times: Временной период в секундах
+        lvl: Уровень логирования (DEBUG, INFO, WARN, ERROR)
+        as_list: Вернуть как список или строку
+    """
+    cmd = ["logcat", "-d", "-v", "time"]
+    
+    if times:
+        from java.lang import System as JavaSystem
+        time_str = f"{times}s ago"
+        cmd.extend(["-t", time_str])
+    
+    if lvl:
+        cmd.extend(["*:{}".format(lvl)])
+    
+    result = runtime_exec(cmd, return_list_lines=True, raise_errors=False)
+    
+    if __id__:
+        result = [line for line in result if f"[{__id__}]" in line]
+    
+    logger.debug(f"Got logs with {__id__=}, {times=}s, {lvl=}")
+    
+    return result if as_list else "\n".join(result)
+
+
 # ==================== Утилиты для UI ====================
 
 def copy_to_clipboard(text_to_copy: str) -> bool:
@@ -1705,6 +1830,64 @@ class UI:
         builder.set_positive_button("OK", on_confirm)
         builder.set_negative_button("Cancel", on_cancel)
         builder.show()
+
+
+class Spinner:
+    """Диалог загрузки с прогресс-индикатором"""
+    
+    def __init__(self, text: str = "Loading..."):
+        self.text = text
+        self.alert_dialog = None
+        self._shown = False
+    
+    def show(self):
+        """Показывает диалог загрузки"""
+        if self._shown:
+            return
+        
+        @run_on_ui_thread
+        def _show():
+            from org.telegram.ui.Components import LineProgressView
+            from org.telegram.ui.ActionBar import AlertDialog
+            
+            builder = AlertDialog.Builder(ApplicationLoader.applicationContext)
+            builder.setTitle(self.text)
+            
+            progress = LineProgressView(ApplicationLoader.applicationContext)
+            builder.setView(progress)
+            
+            self.alert_dialog = builder.create()
+            self.alert_dialog.setCanceledOnTouchOutside(False)
+            self.alert_dialog.show()
+        
+        _show()
+        self._shown = True
+    
+    def hide(self):
+        """Скрывает диалог загрузки"""
+        if not self._shown:
+            return
+        
+        @run_on_ui_thread
+        def _hide():
+            if self.alert_dialog:
+                try:
+                    self.alert_dialog.dismiss()
+                except:
+                    pass
+        
+        _hide()
+        self._shown = False
+    
+    def __enter__(self):
+        """Context manager entry"""
+        self.show()
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit"""
+        self.hide()
+        return False
 
 
 # ==================== Интегрированные плагины ====================
@@ -2040,11 +2223,15 @@ class MSPlugin:
 # Глобальные экземпляры
 autoupdater: Optional[AutoUpdater] = None
 MSLib_instance: Optional['MSLib'] = None
+command_dispatcher: Optional[Dispatcher] = None
 
 
 class MSLib(BasePlugin):
     strings = {
         "en": {
+            "commands_header": "Commands",
+            "command_prefix_label": "Command prefix",
+            "command_prefix_hint": "Symbol used to trigger commands (e.g., . ! /)",
             "autoupdater_header": "AutoUpdater",
             "enable_autoupdater": "Enable AutoUpdater",
             "autoupdater_hint": "Automatically check for plugin updates",
@@ -2065,10 +2252,15 @@ class MSLib(BasePlugin):
             "dev_header": "Developer",
             "debug_mode_title": "Debug mode",
             "debug_mode_hint": "Enables detailed logging for troubleshooting",
+            "update_check_started": "Update check started!",
+            "autoupdater_not_initialized": "AutoUpdater is not initialized",
             "loaded": "MSLib loaded successfully!",
             "unloaded": "MSLib unloaded.",
         },
         "ru": {
+            "commands_header": "Команды",
+            "command_prefix_label": "Префикс команд",
+            "command_prefix_hint": "Символ для вызова команд (например, . ! /)",
             "autoupdater_header": "Автообновление",
             "enable_autoupdater": "Включить автообновление",
             "autoupdater_hint": "Автоматически проверять обновления плагинов",
@@ -2089,6 +2281,8 @@ class MSLib(BasePlugin):
             "dev_header": "Разработчик",
             "debug_mode_title": "Режим отладки",
             "debug_mode_hint": "Включает подробное логирование для диагностики",
+            "update_check_started": "Проверка обновлений запущена!",
+            "autoupdater_not_initialized": "AutoUpdater не инициализирован",
             "loaded": "MSLib успешно загружена!",
             "unloaded": "MSLib выгружена.",
         }
@@ -2096,10 +2290,16 @@ class MSLib(BasePlugin):
     
     def on_plugin_load(self):
         """Вызывается при загрузке плагина"""
-        global autoupdater, MSLib_instance
+        global autoupdater, MSLib_instance, command_dispatcher
         
         # Сохраняем экземпляр для доступа из других мест
         MSLib_instance = self
+        
+        # Инициализация системы команд
+        if command_dispatcher is None:
+            prefix = self.get_setting("command_prefix", ".")
+            command_dispatcher = Dispatcher(__id__, prefix=prefix)
+            logger.info(f"Command dispatcher initialized with prefix: {prefix}")
         
         # Инициализация констант
         _init_constants()
@@ -2107,20 +2307,29 @@ class MSLib(BasePlugin):
         logger.info(localise("loaded"))
         self.log("MSLib initialized")
         
-        # Инициализация автообновления
+        # Инициализация автообновления через callback
         if self.get_setting("enable_autoupdater", False):
-            autoupdater = AutoUpdater()
-            autoupdater.run()
-            logger.info("AutoUpdater started")
-
-            MSLIB_UPDATE_CHANNEL_ID = 1001234567890
-            MSLIB_UPDATE_MESSAGE_ID = 63
-            
-            add_autoupdater_task(__id__, MSLIB_UPDATE_CHANNEL_ID, MSLIB_UPDATE_MESSAGE_ID)
-            logger.info(f"MSLib self-update enabled: channel={MSLIB_UPDATE_CHANNEL_ID}, message={MSLIB_UPDATE_MESSAGE_ID}")
+            # Используем общую функцию toggle_autoupdater для запуска
+            # Это избегает дублирования логики инициализации
+            from functools import partial
+            run_on_ui_thread(partial(self._delayed_autoupdater_start))
+            logger.info("AutoUpdater will be started via delayed callback")
         
         # Инициализация интегрированных плагинов
         self._setup_integrated_plugins()
+
+    
+    def _delayed_autoupdater_start(self):
+        """Отложенный старт AutoUpdater при загрузке плагина"""
+        global autoupdater
+        if not autoupdater:
+            autoupdater = AutoUpdater()
+            add_autoupdater_task(__id__, MSLIB_AUTOUPDATE_CHANNEL_ID, MSLIB_AUTOUPDATE_MSG_ID)
+            logger.info(f"MSLib self-update task added: channel={MSLIB_AUTOUPDATE_CHANNEL_ID}, message={MSLIB_AUTOUPDATE_MSG_ID}")
+        
+        if autoupdater.thread is None or not autoupdater.thread.is_alive():
+            autoupdater.run()
+            logger.info("AutoUpdater started on plugin load")
     
     def _setup_integrated_plugins(self):
         """Регистрация всех интегрированных плагинов (хуки проверяют настройки сами)"""
@@ -2184,13 +2393,52 @@ class MSLib(BasePlugin):
     
 
     def create_settings(self):
+        def toggle_autoupdater(enabled: bool):
+            """Переключает AutoUpdater"""
+            global autoupdater
+            logger.info(f"Toggle AutoUpdater: {enabled}")
+            
+            if enabled:
+                # Запускаем AutoUpdater
+                if not autoupdater:
+                    autoupdater = AutoUpdater()
+                    add_autoupdater_task(__id__, MSLIB_AUTOUPDATE_CHANNEL_ID, MSLIB_AUTOUPDATE_MSG_ID)
+                    logger.info("MSLib self-update task added")
+                
+                if autoupdater.thread is None or not autoupdater.thread.is_alive():
+                    autoupdater.run()
+                    _bulletin("success", "AutoUpdater started!")
+                    logger.info("AutoUpdater started")
+                else:
+                    _bulletin("info", "AutoUpdater already running")
+            else:
+                # Останавливаем AutoUpdater
+                if autoupdater:
+                    autoupdater.force_stop()
+                    _bulletin("info", "AutoUpdater stopped")
+                    logger.info("AutoUpdater stopped")
+                else:
+                    _bulletin("info", "AutoUpdater already stopped")
+        
+        def update_command_prefix(new_prefix: str):
+            """Обновляет префикс команд в Dispatcher"""
+            global command_dispatcher
+            if command_dispatcher and new_prefix:
+                if Dispatcher.validate_prefix(new_prefix):
+                    command_dispatcher.set_prefix(new_prefix)
+                    _bulletin("success", f"Command prefix updated to: {new_prefix}")
+                    logger.info(f"Command prefix updated to: {new_prefix}")
+                else:
+                    _bulletin("error", "Invalid prefix! Must be a single non-alphanumeric character")
+        
         def force_update_check_onclick(_):
             """Принудительная проверка обновлений"""
-            if autoupdater:
+            global autoupdater
+            if autoupdater and autoupdater.thread and autoupdater.thread.is_alive():
                 autoupdater.force_update_check()
                 _bulletin("success", localise("update_check_started"))
             else:
-                _bulletin("error", localise("autoupdater_not_initialized"))
+                _bulletin("error", "AutoUpdater is not running. Enable it first!")
         
         def switch_debug_mode(new_value: bool):
             """Переключение режима отладки"""
@@ -2204,20 +2452,33 @@ class MSLib(BasePlugin):
                 
                 status = "enabled" if value else "disabled"
                 level = "success" if value else "info"
-                message = localise(f"{plugin_name}_{status}")
+                # Используем дефис вместо подчеркивания
+                message_key = f"{plugin_name.replace('_', '-')}-{status}"
+                message = localise(message_key)
                 logger.info(f"[BULLETIN] Level: {level}, Message: {message}")
                 _bulletin(level, message)
                 logger.info("[TOGGLE] Complete - hook will check setting on next call")
             return callback
         
         return [
+            Header(text=localise("commands_header")),
+            Input(
+                key="command_prefix",
+                text=localise("command_prefix_label"),
+                subtext=localise("command_prefix_hint"),
+                default=".",
+                icon="msg_limit_stories",
+                on_change=update_command_prefix
+            ),
+            Divider(),
             Header(text=localise("autoupdater_header")),
             Switch(
                 key="enable_autoupdater",
                 text=localise("enable_autoupdater"),
                 subtext=localise("autoupdater_hint"),
                 default=False,
-                icon="msg_autodownload"
+                icon="msg_autodownload",
+                on_change=toggle_autoupdater
             ),
             Text(
                 text=localise("force_update_check"),
@@ -2287,21 +2548,21 @@ class MSLib(BasePlugin):
 
 
 __all__ = [
-    # Основной класс
+    # Main classes
     'MSLib',
     'MSPlugin',
     
-    # Классы для работы с кешем
+    # Cache classes
     'CacheFile',
     'JsonCacheFile',
     'JsonDB',
     
-    # Callback обертки
+    # Callback wrappers
     'Callback1',
     'Callback2',
     'Callback5',
     
-    # Парсеры
+    # Parsers
     'HTML',
     'Markdown',
     'TLEntityType',
@@ -2312,7 +2573,7 @@ __all__ = [
     'build_bulletin_helper',
     'BulletinHelper',
     
-    # Система команд
+    # Command system
     'Dispatcher',
     'Command',
     'ArgSpec',
@@ -2321,7 +2582,7 @@ __all__ = [
     'cast_arg',
     'smart_cast',
     
-    # Исключения
+    # Exceptions
     'CannotCastError',
     'WrongArgumentAmountError',
     'MissingRequiredArguments',
@@ -2339,25 +2600,32 @@ __all__ = [
     # Requests
     'Requests',
     
-    # UI утилиты
+    # UI utilities
     'UI',
+    'Spinner',
     
-    # Inline система
+    # Inline system
     'Inline',
     
-    # Декораторы
+    # System utilities
+    'runtime_exec',
+    'get_logs',
+    'escape_html',
+    'pluralization_string',
+    
+    # Decorators
     'command',
     'uri',
     'message_uri',
     'watcher',
     
-    # Интегрированные плагины (хуки)
+    # Integrated plugins (hooks)
     'HashTagsFixHook',
     'ArticleViewerFixHook',
     'NoCallConfirmationHook',
     'OldBottomForwardHook',
     
-    # Утилиты
+    # Utilities
     'build_log',
     'format_exc',
     'format_exc_from',
@@ -2373,10 +2641,10 @@ __all__ = [
     # Singleton
     'SingletonMeta',
     
-    # Локализация
+    # Localization
     'Locales',
     
-    # Константы
+    # Constants
     'CACHE_DIRECTORY',
     'PLUGINS_DIRECTORY',
     'LOCALE',

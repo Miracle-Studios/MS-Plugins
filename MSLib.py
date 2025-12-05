@@ -46,27 +46,27 @@ from client_utils import (get_messages_controller, get_last_fragment,
                           send_request, get_account_instance, send_message,
                           get_file_loader, run_on_queue)
 
-from java import cast, dynamic_proxy, jint, jarray, jclass
-from java.util import Locale, ArrayList
-from java.lang import Long, Integer, String, Boolean
-from java.io import File
-from org.telegram.tgnet import TLRPC, TLObject
-from org.telegram.ui import ChatActivity
-from org.telegram.messenger import (R, Utilities, AndroidUtilities, ApplicationLoader,
+from java import cast, dynamic_proxy, jint, jarray, jclass # type: ignore
+from java.util import Locale, ArrayList # type: ignore
+from java.lang import Long, Integer, String, Boolean # type: ignore
+from java.io import File # type: ignore
+from org.telegram.tgnet import TLRPC, TLObject # type: ignore
+from org.telegram.ui import ChatActivity # type: ignore
+from org.telegram.messenger import (R, Utilities, AndroidUtilities, ApplicationLoader, # type: ignore
                                     LocaleController, MessageObject, UserConfig, AccountInstance, FileLoader)
-from org.telegram.ui.ActionBar import Theme
-from com.exteragram.messenger.plugins import PluginsController
-from android.text import SpannableStringBuilder, Spanned, InputType
-from android.view import Gravity, View
-from android.widget import LinearLayout, FrameLayout, TextView
-from android.util import TypedValue
+from org.telegram.ui.ActionBar import Theme # type: ignore
+from com.exteragram.messenger.plugins import PluginsController # type: ignore
+from android.text import SpannableStringBuilder, Spanned, InputType # type: ignore
+from android.view import Gravity, View # type: ignore
+from android.widget import LinearLayout, FrameLayout, TextView # type: ignore
+from android.util import TypedValue # type: ignore
 from hook_utils import get_private_field, set_private_field
 
-from org.telegram.ui import ChatActivityContainer, ArticleViewer
-from org.telegram.ui.Components.voip import VoIPHelper
-from org.telegram.messenger import HashtagSearchController, MediaDataController
-from android.view import MotionEvent
-from android.app import Activity
+from org.telegram.ui import ChatActivityContainer, ArticleViewer # type: ignore
+from org.telegram.ui.Components.voip import VoIPHelper # type: ignore
+from org.telegram.messenger import HashtagSearchController, MediaDataController # type: ignore
+from android.view import MotionEvent # type: ignore
+from android.app import Activity # type: ignore
 
 
 __name__ = "MSLib"
@@ -1085,15 +1085,19 @@ class InnerBulletinHelper(_BulletinHelper):
         self.prefix = "" if not prefix or not prefix.strip() else f"{prefix}:"
     
     def show_info(self, message: str, fragment: Optional[Any] = None):
+        """Показывает информационное сообщение с префиксом"""
         _BulletinHelper.show_info(f"{self.prefix} {message}", fragment)
     
     def show_error(self, message: str, fragment: Optional[Any] = None):
+        """Показывает сообщение об ошибке с префиксом"""
         _BulletinHelper.show_error(f"{self.prefix} {message}", fragment)
     
     def show_success(self, message: str, fragment: Optional[Any] = None):
+        """Показывает сообщение об успехе с префиксом"""
         _BulletinHelper.show_success(f"{self.prefix} {message}", fragment)
     
     def show_with_copy(self, message: str, text_to_copy: str, icon_res_id: int):
+        """Показывает сообщение с кнопкой копирования"""
         _BulletinHelper.show_with_button(
             f"{self.prefix} {message}" if not message.startswith(f"{self.prefix} ") else message,
             icon_res_id,
@@ -1102,15 +1106,19 @@ class InnerBulletinHelper(_BulletinHelper):
         )
     
     def show_info_with_copy(self, message: str, copy_text: str):
+        """Показывает информацию с кнопкой копирования"""
         self.show_with_copy(f"{self.prefix} {message}", str(copy_text), R.raw.info)
     
     def show_error_with_copy(self, message: str, copy_text: str):
+        """Показывает ошибку с кнопкой копирования"""
         self.show_with_copy(f"{self.prefix} {message}", str(copy_text), R.raw.error)
     
     def show_success_with_copy(self, message: str, copy_text: str):
+        """Показывает успех с кнопкой копирования"""
         self.show_with_copy(f"{self.prefix} {message}", str(copy_text), R.raw.contact_check)
     
     def show_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int, icon_res_id: int = 0):
+        """Показывает сообщение с кнопкой перехода к посту"""
         _BulletinHelper.show_with_button(
             f"{self.prefix} {message}",
             icon_res_id,
@@ -1119,12 +1127,15 @@ class InnerBulletinHelper(_BulletinHelper):
         )
     
     def show_info_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int):
+        """Показывает информацию с кнопкой перехода к посту"""
         self.show_with_post_redirect(message, button_text, peer_id, message_id, R.raw.info)
     
     def show_error_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int):
+        """Показывает ошибку с кнопкой перехода к посту"""
         self.show_with_post_redirect(message, button_text, peer_id, message_id, R.raw.error)
     
     def show_success_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int):
+        """Показывает успех с кнопкой перехода к посту"""
         self.show_with_post_redirect(message, button_text, peer_id, message_id, R.raw.contact_check)
 
 
@@ -1669,8 +1680,8 @@ class Requests:
 # ==================== Системные утилиты ====================
 def runtime_exec(cmd: List[str], return_list_lines: bool = False, raise_errors: bool = True) -> Union[List[str], str]:
     """Выполняет системную команду через Runtime.exec"""
-    from java.lang import Runtime
-    from java.io import BufferedReader, InputStreamReader, IOException
+    from java.lang import Runtime # type: ignore
+    from java.io import BufferedReader, InputStreamReader, IOException # type: ignore
     
     result = []
     process = None
@@ -1717,7 +1728,7 @@ def get_logs(__id__: Optional[str] = None, times: Optional[int] = None, lvl: Opt
     cmd = ["logcat", "-d", "-v", "time"]
     
     if times:
-        from java.lang import System as JavaSystem
+        from java.lang import System as JavaSystem # type: ignore
         time_str = f"{times}s ago"
         cmd.extend(["-t", time_str])
     
@@ -1734,79 +1745,34 @@ def get_logs(__id__: Optional[str] = None, times: Optional[int] = None, lvl: Opt
     return result if as_list else "\n".join(result)
 
 
+def pluralization_string(count: int, variants: Tuple[str, str, str]) -> str:
+    """Возвращает правильную форму слова для русского языка
+    
+    Args:
+        count: Количество
+        variants: Кортеж из 3 вариантов (один, два, пять)
+                  Например: ('файл', 'файла', 'файлов')
+    
+    Returns:
+        Правильная форма слова
+    
+    Examples:
+        >>> pluralization_string(1, ('файл', 'файла', 'файлов'))
+        'файл'
+        >>> pluralization_string(2, ('файл', 'файла', 'файлов'))
+        'файла'
+        >>> pluralization_string(5, ('файл', 'файла', 'файлов'))
+        'файлов'
+    """
+    if count % 10 == 1 and count % 100 != 11:
+        return variants[0]
+    elif count % 10 in [2, 3, 4] and count % 100 not in [12, 13, 14]:
+        return variants[1]
+    else:
+        return variants[2]
+
+
 # ==================== Утилиты для UI ====================
-
-def copy_to_clipboard(text_to_copy: str) -> bool:
-    """Копирует текст в буфер обмена"""
-    return AndroidUtilities.addToClipboard(text_to_copy)
-
-
-class InnerBulletinHelper(_BulletinHelper):
-    """Расширенный BulletinHelper с префиксами и дополнительными методами"""
-    
-    def __init__(self, prefix: Optional[str] = None):
-        self.prefix = "" if not prefix or not prefix.strip() else f"{prefix}:"
-    
-    def show_info(self, message: str, fragment: Optional[Any] = None):
-        """Показывает информационное сообщение с префиксом"""
-        _BulletinHelper.show_info(f"{self.prefix} {message}" if self.prefix else message, fragment)
-    
-    def show_error(self, message: str, fragment: Optional[Any] = None):
-        """Показывает сообщение об ошибке с префиксом"""
-        _BulletinHelper.show_error(f"{self.prefix} {message}" if self.prefix else message, fragment)
-    
-    def show_success(self, message: str, fragment: Optional[Any] = None):
-        """Показывает сообщение об успехе с префиксом"""
-        _BulletinHelper.show_success(f"{self.prefix} {message}" if self.prefix else message, fragment)
-    
-    def show_with_copy(self, message: str, text_to_copy: str, icon_res_id: int):
-        """Показывает сообщение с кнопкой копирования"""
-        _BulletinHelper.show_with_button(
-            f"{self.prefix} {message}" if self.prefix and not message.startswith(f"{self.prefix} ") else message,
-            icon_res_id,
-            "Copy",
-            on_click=lambda: copy_to_clipboard(text_to_copy) and _BulletinHelper.show_copied_to_clipboard(),
-        )
-    
-    def show_info_with_copy(self, message: str, copy_text: str):
-        """Показывает информацию с кнопкой копирования"""
-        self.show_with_copy(message, str(copy_text), R.raw.info)
-    
-    def show_error_with_copy(self, message: str, copy_text: str):
-        """Показывает ошибку с кнопкой копирования"""
-        self.show_with_copy(message, str(copy_text), R.raw.error)
-    
-    def show_success_with_copy(self, message: str, copy_text: str):
-        """Показывает успех с кнопкой копирования"""
-        self.show_with_copy(message, str(copy_text), R.raw.contact_check)
-    
-    def show_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int, icon_res_id: int = 0):
-        """Показывает сообщение с кнопкой перехода к посту"""
-        _BulletinHelper.show_with_button(
-            f"{self.prefix} {message}" if self.prefix else message,
-            icon_res_id,
-            button_text,
-            on_click=lambda: get_last_fragment().presentFragment(ChatActivity.of(peer_id, message_id)),
-        )
-    
-    def show_info_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int):
-        """Показывает информацию с кнопкой перехода к посту"""
-        self.show_with_post_redirect(message, button_text, peer_id, message_id, R.raw.info)
-    
-    def show_error_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int):
-        """Показывает ошибку с кнопкой перехода к посту"""
-        self.show_with_post_redirect(message, button_text, peer_id, message_id, R.raw.error)
-    
-    def show_success_with_post_redirect(self, message: str, button_text: str, peer_id: int, message_id: int):
-        """Показывает успех с кнопкой перехода к посту"""
-        self.show_with_post_redirect(message, button_text, peer_id, message_id, R.raw.contact_check)
-
-
-def build_bulletin_helper(prefix: Optional[str] = None) -> InnerBulletinHelper:
-    """Создаёт BulletinHelper с префиксом"""
-    return InnerBulletinHelper(prefix)
-
-
 class UI:
     """UI утилиты"""
     
@@ -1847,8 +1813,8 @@ class Spinner:
         
         @run_on_ui_thread
         def _show():
-            from org.telegram.ui.Components import LineProgressView
-            from org.telegram.ui.ActionBar import AlertDialog
+            from org.telegram.ui.Components import LineProgressView # type: ignore
+            from org.telegram.ui.ActionBar import AlertDialog # type: ignore
             
             builder = AlertDialog.Builder(ApplicationLoader.applicationContext)
             builder.setTitle(self.text)
@@ -2335,7 +2301,7 @@ class MSLib(BasePlugin):
         """Регистрация всех интегрированных плагинов (хуки проверяют настройки сами)"""
         try:
             # 1. HashTags Fix
-            from java.lang import String, Boolean
+            from java.lang import String, Boolean # type: ignore
             chat_activity_class = ChatActivity.getClass()
             method = chat_activity_class.getDeclaredMethod("openHashtagSearch", String.getClass(), Boolean.TYPE)
             self.hook_method(method, HashTagsFixHook())
@@ -2354,8 +2320,8 @@ class MSLib(BasePlugin):
         
         try:
             # 3. No Call Confirmation
-            from org.telegram.ui.Components.voip import VoIPHelper
-            from android.app import Activity
+            from org.telegram.ui.Components.voip import VoIPHelper  # type: ignore
+            from android.app import Activity # type: ignore
             voip_helper_class = VoIPHelper.getClass()
             method = voip_helper_class.getDeclaredMethod(
                 "startCall",

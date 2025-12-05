@@ -83,7 +83,7 @@ Current version: **1.1.0-beta**
 
 ## 🔗 Links
 
-- [GitHub Repository](https://github.com/Miracle-Studios/MiracleS-Plugins)
+- [GitHub Repository](https://github.com/Miracle-Studios/MS-Plugins/)
 - [Telegram Channel](https://t.me/MiracleStudios)
 - [Author](https://t.me/Imrcle)
 

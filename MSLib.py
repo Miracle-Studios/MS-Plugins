@@ -10,15 +10,16 @@
 ||            MiracleS Library - Powerful Utility Library           ||
 ||                for exteraGram Plugin Development                 ||
 ||                                                                  ||
-||                     Version 2.1.0 | @Imrcle                      ||
+||                     Version 1.1.0 | @Imrcle                      ||
 ||                                                                  ||
-||                    https://t.me/MSTeamGlobal                     ||
+||                   https://t.me/MiracleStudios                    ||
 ||                                                                  ||
 ||                                                                  ||
 ||        PLEASE DO NOT COPY THIS CODE WITHOUT NOTIFYING ME.        ||
 >>==================================================================<<
 """
 import copy
+from email.mime import text
 import json
 import zlib
 import inspect
@@ -43,7 +44,7 @@ from android_utils import log as _log, run_on_ui_thread
 from client_utils import (get_messages_controller, get_last_fragment,
                           send_request, get_account_instance, send_message)
 
-from java import cast, dynamic_proxy, jint, jarray
+from java import cast, dynamic_proxy, jint, jarray, jclass
 from java.util import Locale, ArrayList
 from java.lang import Long, Integer, String, Boolean
 from java.io import File
@@ -56,18 +57,21 @@ from android.text import SpannableStringBuilder, Spanned, InputType
 from android.view import Gravity, View
 from android.widget import LinearLayout, FrameLayout, TextView
 from android.util import TypedValue
-from android.app import Activity
 from hook_utils import get_private_field, set_private_field
 
 from org.telegram.ui import ChatActivityContainer, ArticleViewer
+from org.telegram.ui.Components.voip import VoIPHelper
 from org.telegram.messenger import HashtagSearchController, MediaDataController
+from android.view import MotionEvent
+from android.app import Activity
 
-__id__ = "miracles_library"
+
 __name__ = "MSLib"
-__description__ = "MSLib v2.3.5 - Complete update notifications: shows 'no updates', 'up to date', 'update found' messages with localization | Commands, CommandManager, Companion, JsonDB, Extended API"
-__icon__ = "ByMiraclePersona/3"
+__id__ = "mslib"
+__description__ = "Безкрутая либа"
+__icon__ = "MSMainPack/0"
 __author__ = "@Imrcle"
-__version__ = "2.3.6"
+__version__ = "1.1.0"
 __min_version__ = "12.0.0"
 
 
@@ -90,7 +94,6 @@ MSLIB_GLOBAL_PREMIUM = 2
 DEFAULT_AUTOUPDATE_TIMEOUT = "600"  # 10 минут
 DEFAULT_DISABLE_TIMESTAMP_CHECK = False
 DEFAULT_DEBUG_MODE = False
-DEFAULT_SPINNER_TEXT = "Loading..."
 
 
 def _init_constants():
@@ -139,11 +142,7 @@ def build_log(tag: str, level=logging.INFO) -> logging.Logger:
     return logger
 
 
-# ==================== Глобальные переменные ====================
 logger = build_log(__name__)
-command_manager = None  # CommandManager - будет инициализирован при загрузке плагина
-companion = None  # Companion - будет инициализирован при загрузке плагина
-autoupdater = None  # AutoUpdater - будет инициализирован при загрузке плагина
 
 
 def format_exc() -> str:
@@ -367,90 +366,6 @@ class Markdown:
 def link(text: str, url: str) -> str:
     """Создает HTML ссылку"""
     return f'<a href="{url}">{text}</a>'
-
-
-# ==================== Helpers ====================
-def _bulletin(level: str, message: str):
-    """Helper для показа уведомлений через InnerBulletinHelper"""
-    helper = InnerBulletinHelper("MSLib")
-    getattr(helper, f"show_{level}")(message)
-
-
-# ==================== Pluralization ====================
-def pluralization_string(number: int, words: List[str]) -> str:
-    """
-    Возвращает правильную форму слова в зависимости от числа.
-    
-    Args:
-        number (int): Число
-        words (List[str]): Список из 3 форм слова [1, 2-4, 5+]
-    
-    Returns:
-        str: Форматированная строка с числом и правильным словом
-    
-    Examples:
-        pluralization_string(1, ["file", "files", "files"]) -> "1 file"
-        pluralization_string(3, ["file", "files", "files"]) -> "3 files"
-        pluralization_string(1, ["плагин", "плагина", "плагинов"]) -> "1 плагин"
-        pluralization_string(3, ["плагин", "плагина", "плагинов"]) -> "3 плагина"
-        pluralization_string(5, ["плагин", "плагина", "плагинов"]) -> "5 плагинов"
-    """
-    if number % 10 == 1 and number % 100 != 11:
-        return f"{number} {words[0]}"
-    elif 2 <= number % 10 <= 4 and (number % 100 < 10 or number % 100 >= 20):
-        return f"{number} {words[1]}"
-    else:
-        return f"{number} {words[2]}"
-
-
-# ==================== Runtime Execution ====================
-def runtime_exec(cmd: List[str], return_list_lines: bool = False, raise_errors: bool = True) -> Union[List[str], str]:
-    """
-    Выполняет shell команду через Java Runtime.
-    
-    Args:
-        cmd (List[str]): Команда и аргументы
-        return_list_lines (bool): Вернуть список строк или объединенную строку
-        raise_errors (bool): Выбрасывать исключения при ошибках
-    
-    Returns:
-        Union[List[str], str]: Вывод команды
-    """
-    from java.lang import Runtime
-    from java.io import BufferedReader, InputStreamReader, IOException
-    
-    result = []
-    process = None
-    reader = None
-    try:
-        process = Runtime.getRuntime().exec(list_to_arraylist(cmd, int_auto_convert=False))
-        reader = BufferedReader(InputStreamReader(process.getInputStream()))
-        line = reader.readLine()
-        while line is not None:
-            result.append(str(line))
-            line = reader.readLine()
-        process.waitFor()
-    except IOException as e:
-        if raise_errors:
-            raise RuntimeError(f"IO Error: {e}")
-        logger.error(f"runtime_exec IO error: {format_exc()}")
-    except Exception as e:
-        if raise_errors:
-            raise RuntimeError(f"Execution error: {e}")
-        logger.error(f"runtime_exec error: {format_exc()}")
-    finally:
-        if reader:
-            try:
-                reader.close()
-            except:
-                pass
-        if process:
-            try:
-                process.destroy()
-            except:
-                pass
-    
-    return result if return_list_lines else "\n".join(result)
 
 
 # ==================== Работа с Java коллекциями ====================
@@ -677,7 +592,7 @@ class Dispatcher:
     @staticmethod
     def validate_prefix(prefix: str) -> bool:
         """Проверяет корректность префикса"""
-        return prefix and " " not in prefix
+        return len(prefix) == 1 and not prefix.isalnum()
     
     def set_prefix(self, prefix: str):
         """Устанавливает новый префикс"""
@@ -687,9 +602,6 @@ class Dispatcher:
         
         logger.info(f"{self.plugin_id} dp: Set '{prefix}' prefix.")
         self.prefix = prefix
-        # Обновляем кеш префиксов если CommandManager доступен
-        if 'command_manager' in globals() and command_manager:
-            command_manager.update_dispatcher_prefix_cache(self.plugin_id)
     
     def register_command(self, name: str):
         """Декоратор для регистрации команды"""
@@ -697,177 +609,13 @@ class Dispatcher:
             cmd = create_command(func, name)
             self.listeners[name] = cmd
             logger.info(f"{self.plugin_id} dp: Registered command {name}.")
-            return cmd
+            return func
         return decorator
     
     def unregister_command(self, name: str):
         """Удаляет команду"""
         logger.info(f"{self.plugin_id} dp: Unregistered command '{name}'.")
         self.listeners.pop(name, None)
-
-
-class CommandManager:
-    """Менеджер команд с поддержкой приоритетов и кеширования префиксов"""
-    
-    def __init__(self):
-        self.dispatchers: Dict[str, Dispatcher] = {}  # plugin_id -> Dispatcher
-        self.temporal = True
-        self.prefixes_cache = None  # JsonCacheFile будет создан при инициализации
-        self.pending_commands: Dict[str, List[Command]] = {}
-    
-    def initialize_cache(self):
-        """Инициализирует кеш префиксов"""
-        if self.prefixes_cache is None and CACHE_DIRECTORY:
-            self.prefixes_cache = JsonCacheFile("mslib__cmd_prefixes.json", {})
-    
-    def get_dispatcher(self, plugin_id: str, prefix: str = ".", commands_priority: int = -1) -> Dispatcher:
-        """Получает или создает диспетчер для плагина"""
-        self.initialize_cache()
-        
-        # Проверяем кеш префиксов
-        if self.prefixes_cache and plugin_id in self.prefixes_cache.content:
-            prefix = self.prefixes_cache.content[plugin_id]
-        
-        if plugin_id not in self.dispatchers:
-            self.dispatchers[plugin_id] = Dispatcher(
-                plugin_id=plugin_id,
-                prefix=prefix,
-                commands_priority=commands_priority,
-            )
-        
-        logger.info(f"Got dispatcher for '{plugin_id}' with prefix '{prefix}'.")
-        return self.dispatchers[plugin_id]
-    
-    def remove_dispatcher(self, plugin_id: str):
-        """Удаляет диспетчер"""
-        self.dispatchers.pop(plugin_id, None)
-        logger.info(f"Removed dispatcher for '{plugin_id}'.")
-    
-    def sort_dispatchers(self):
-        """Сортирует диспетчеры по приоритету (большой приоритет = первым обрабатывается)"""
-        self.dispatchers = dict(sorted(
-            self.dispatchers.items(),
-            key=lambda i: i[1].commands_priority,
-            reverse=True
-        ))
-        logger.debug("Dispatchers sorted by commands priority.")
-    
-    def mark_not_temporal(self):
-        """Помечает менеджер как инициализированный"""
-        self.temporal = False
-    
-    def load_pending_commands(self):
-        """Загружает отложенные команды"""
-        logger.info(f"Loading pending commands: {list(self.pending_commands.keys())}")
-        
-        for plugin_id, commands in list(self.pending_commands.items()):
-            if not commands:
-                continue
-            
-            logger.info(f"Loading pending commands for '{plugin_id}'...")
-            dispatcher = self.get_dispatcher(plugin_id)
-            
-            for command in commands:
-                logger.info(f"Registered pending command '{command.name}' for '{plugin_id}'.")
-                dispatcher.listeners[command.name] = command
-        
-        self.pending_commands.clear()
-    
-    def save_commands_as_pending(self):
-        """Сохраняет все команды как отложенные"""
-        logger.info("Saving all commands to pending list...")
-        
-        for plugin_id, dp in self.dispatchers.items():
-            self.pending_commands[plugin_id] = list(dp.listeners.values())
-    
-    def unregister_all(self):
-        """Удаляет все диспетчеры"""
-        logger.info("Unregistering all dispatchers...")
-        self.dispatchers.clear()
-    
-    def update_dispatcher_prefix_cache(self, plugin_id: str):
-        """Обновляет кеш префиксов для диспетчера"""
-        if not self.prefixes_cache:
-            self.initialize_cache()
-        
-        if plugin_id not in self.dispatchers:
-            logger.warning(f"Cannot update prefix cache for unknown plugin '{plugin_id}'")
-            return
-        
-        dp = self.dispatchers[plugin_id]
-        logger.info(f"Updating prefix cache for '{plugin_id}': '{dp.prefix}'")
-        
-        if dp.prefix == ".":  # Дефолтный префикс
-            self.prefixes_cache.content.pop(plugin_id, None)
-        else:
-            self.prefixes_cache.content[plugin_id] = dp.prefix
-        
-        self.prefixes_cache.write()
-
-
-# ==================== Singleton metaclass ====================
-class SingletonMeta(type):
-    """Метакласс для создания Singleton"""
-    _instances = {}
-    
-    def __call__(cls, *args, **kwargs):
-        if cls not in cls._instances:
-            cls._instances[cls] = super().__call__(*args, **kwargs)
-        return cls._instances[cls]
-
-
-class Companion(metaclass=SingletonMeta):
-    """Компаньон для хранения данных между перезагрузками плагина"""
-    
-    defaults = {
-        "autoupdates_tasks": [],
-        "pending_commands": {},
-    }
-    
-    def __init__(self):
-        self.module = None
-        self.companion_path = None
-    
-    def initialize(self):
-        """Инициализирует пути и создает файл компаньона"""
-        if PLUGINS_DIRECTORY:
-            companion_dir = os.path.join(PLUGINS_DIRECTORY, "mslib_companion")
-            self.companion_path = os.path.join(companion_dir, "__init__.py")
-            self.create()
-            self.import_it()
-    
-    def create(self):
-        """Создает файл компаньона если его нет"""
-        if not self.companion_path or os.path.exists(self.companion_path):
-            return
-        
-        lines = ["# Auto-generated MSLib companion file\n"]
-        for key, default in Companion.defaults.items():
-            lines.append(f"\n{key} = {repr(default)}")
-        
-        os.makedirs(os.path.dirname(self.companion_path), exist_ok=True)
-        with open(self.companion_path, "w", encoding="utf-8") as f:
-            f.writelines(lines)
-        
-        logger.info(f"Created companion file at {self.companion_path}")
-    
-    def import_it(self):
-        """Импортирует модуль компаньона"""
-        if not self.companion_path:
-            return
-        
-        try:
-            # Добавляем путь к модулю в sys.path если его там нет
-            companion_parent = os.path.dirname(self.companion_path)
-            if companion_parent not in sys.path:
-                sys.path.insert(0, os.path.dirname(companion_parent))
-            
-            import mslib_companion
-            self.module = mslib_companion
-            logger.info("Imported companion module")
-        except ImportError as e:
-            logger.error(f"Failed to import companion: {format_exc_only(e)}")
-            self.module = None
 
 
 # ==================== Декораторы ====================
@@ -1047,17 +795,6 @@ class Locales:
         "dev_header": "Developer",
         "debug_mode_title": "Debug mode",
         "debug_mode_hint": "Enables detailed logging for troubleshooting",
-        "commands_header": "Commands",
-        "command_prefix_label": "Command prefix",
-        "command_prefix_hint": "Prefix for plugin commands",
-        "update_check_started": "Update check started!",
-        "autoupdater_not_initialized": "AutoUpdater is not initialized",
-        "update_check_failed": "Update check failed for {}",
-        "already_up_to_date": "{}: Already up to date",
-        "update_found": "Update found for {}",
-        "forcing_update": "Forcing update for {}",
-        "no_updates_found": "No updates found",
-        "all_plugins_up_to_date": "All plugins are up to date!",
         "hashtags_fix_enabled": "HashTags Fix enabled",
         "hashtags_fix_disabled": "HashTags Fix disabled",
         "article_viewer_fix_enabled": "Article Viewer Fix enabled",
@@ -1095,25 +832,14 @@ class Locales:
         "dev_header": "Разработчик",
         "debug_mode_title": "Режим отладки",
         "debug_mode_hint": "Включает подробное логирование для диагностики",
-        "commands_header": "Команды",
-        "command_prefix_label": "Префикс команд",
-        "command_prefix_hint": "Префикс для команд плагинов",
-        "update_check_started": "Проверка обновлений запущена!",
-        "autoupdater_not_initialized": "AutoUpdater не инициализирован",
-        "update_check_failed": "Не удалось проверить обновления для {}",
-        "already_up_to_date": "{}: Уже актуальная версия",
-        "update_found": "Найдено обновление для {}",
-        "forcing_update": "Принудительное обновление для {}",
-        "no_updates_found": "Обновления не найдены",
-        "all_plugins_up_to_date": "Все плагины актуальны!",
-        "hashtags_fix_enabled": "HashTags Fix включён",
-        "hashtags_fix_disabled": "HashTags Fix выключен",
-        "article_viewer_fix_enabled": "Article Viewer Fix включён",
-        "article_viewer_fix_disabled": "Article Viewer Fix выключен",
-        "no_call_confirmation_enabled": "No Call Confirmation включён",
-        "no_call_confirmation_disabled": "No Call Confirmation выключен",
-        "old_bottom_forward_enabled": "Old Bottom Forward включён",
-        "old_bottom_forward_disabled": "Old Bottom Forward выключен",
+        "hashtags_fix_enabled": "Исправление хештегов включено",
+        "hashtags_fix_disabled": "Исправление хештегов выключено",
+        "article_viewer_fix_enabled": "Исправление просмотра статей включено",
+        "article_viewer_fix_disabled": "Исправление просмотра статей выключено",
+        "no_call_confirmation_enabled": "Без подтверждения звонка включено",
+        "no_call_confirmation_disabled": "Без подтверждения звонка выключено",
+        "old_bottom_forward_enabled": "Старая пересылка включена",
+        "old_bottom_forward_disabled": "Старая пересылка выключена",
     }
     default = en
 
@@ -1126,16 +852,6 @@ def localise(key: str) -> str:
         return locale_dict.get(key, key)
     except:
         return key
-
-
-def get_command_prefix() -> str:
-    """Получает текущий префикс команд из настроек MSLib"""
-    global MSLib_instance
-    if MSLib_instance is not None:
-        return MSLib_instance.get_setting("command_prefix", ".")
-    return "."
-
-
 class CacheFile:
     """Класс для работы с файлами кеша"""
     
@@ -1373,7 +1089,13 @@ def build_bulletin_helper(prefix: Optional[str] = None) -> InnerBulletinHelper:
     return InnerBulletinHelper(prefix)
 
 
+# Глобальный экземпляр BulletinHelper
 BulletinHelper = build_bulletin_helper(__name__)
+
+
+def _bulletin(level: str, message: str):
+    """Helper для показа уведомлений через глобальный BulletinHelper"""
+    getattr(BulletinHelper, f"show_{level}")(message, None)
 
 
 # ==================== AutoUpdater ====================
@@ -1392,7 +1114,6 @@ class AutoUpdater:
         self.thread: Optional[threading.Thread] = None
         self.forced_stop = False
         self.forced_update_check = False
-        self.update_event = threading.Event()  # Для пробуждения потока
         self.tasks: List[UpdaterTask] = []
         self.msg_edited_ts_cache = JsonCacheFile("mslib_au__msg_edited_ts", {})
         self.hash = str(zlib.adler32(id(self).to_bytes(8, "little")))
@@ -1421,34 +1142,22 @@ class AutoUpdater:
     
     def cycle(self):
         """Цикл проверки обновлений"""
-        # Начальная задержка
-        self.update_event.wait(5)
+        event = threading.Event()
+        event.wait(5)
         
         while not self.forced_stop:
             try:
-                # Проверяем флаг принудительного обновления
                 if self.forced_update_check:
-                    self.logger.info("Processing forced update check")
                     self.check_for_updates(show_notifications=True)
                     self.forced_update_check = False
-                    self.update_event.clear()  # Сбрасываем событие
-                    continue  # Сразу переходим к следующей итерации
-                
-                # Обычная проверка по таймауту
-                timeout = self.get_timeout_time()
-                self.logger.debug(f"Waiting {timeout}s for next update check")
-                
-                # Ждём таймаут или пробуждение через update_event
-                self.update_event.wait(timeout)
-                
-                if not self.forced_stop and not self.forced_update_check:
-                    self.check_for_updates(show_notifications=False)
-                
-                self.update_event.clear()  # Сбрасываем событие после обработки
-                
+                else:
+                    timeout = self.get_timeout_time()
+                    event.wait(timeout)
+                    if not self.forced_stop:
+                        self.check_for_updates(show_notifications=False)
             except Exception as e:
                 self.logger.error(f"Error in update cycle: {format_exc()}")
-                self.update_event.wait(60)
+                event.wait(60)
         
         self.thread = None
         self.logger.info("Force stopped.")
@@ -1457,27 +1166,19 @@ class AutoUpdater:
         """Проверяет обновления для всех зарегистрированных задач"""
         self.logger.info("Checking for updates...")
         
-        if not self.tasks:
-            self.logger.info("No tasks to check")
-            if show_notifications:
-                _bulletin("info", localise("no_updates_found"))
-            return
-        
         for task in self.tasks:
             try:
                 self._check_task_for_update(task, show_notifications)
             except Exception as e:
                 self.logger.error(f"Error checking update for {task.plugin_id}: {format_exc()}")
-                if show_notifications:
-                    _bulletin("error", localise("update_check_failed").format(task.plugin_id))
     
     def _check_task_for_update(self, task: UpdaterTask, show_notifications: bool = False):
         """Проверяет обновление для конкретной задачи"""
-        def get_message_callback(msg, error):
-            if error or not msg:
-                self.logger.warning(f"Failed to get message for {task.plugin_id}: {error}")
+        def get_message_callback(msg):
+            if not msg:
+                self.logger.warning(f"Failed to get message for {task.plugin_id}")
                 if show_notifications:
-                    _bulletin("error", localise("update_check_failed").format(task.plugin_id))
+                    InnerBulletinHelper("MSLib").show_error(f"Update check failed for {task.plugin_id}")
                 return
             
             # Проверяем настройку disable_timestamp_check
@@ -1492,13 +1193,13 @@ class AutoUpdater:
                 if current_edit_date <= cached_edit_date:
                     self.logger.info(f"No updates for {task.plugin_id}")
                     if show_notifications:
-                        _bulletin("info", localise("already_up_to_date").format(task.plugin_id))
+                        InnerBulletinHelper("MSLib").show_info(f"{task.plugin_id}: Already up to date")
                     return
                 
                 # Обновление доступно
                 self.logger.info(f"Update available for {task.plugin_id}: {cached_edit_date} -> {current_edit_date}")
                 if show_notifications:
-                    _bulletin("success", localise("update_found").format(task.plugin_id))
+                    InnerBulletinHelper("MSLib").show_success(f"Update found for {task.plugin_id}")
                 
                 # Обновляем кеш
                 self.msg_edited_ts_cache.content[cache_key] = current_edit_date
@@ -1506,7 +1207,7 @@ class AutoUpdater:
             else:
                 self.logger.info(f"Timestamp check disabled, forcing update for {task.plugin_id}")
                 if show_notifications:
-                    _bulletin("info", localise("forcing_update").format(task.plugin_id))
+                    InnerBulletinHelper("MSLib").show_info(f"Forcing update for {task.plugin_id}")
             
             # Скачиваем и устанавливаем
             download_and_install_plugin(msg, task, show_notifications)
@@ -1515,7 +1216,7 @@ class AutoUpdater:
         Requests.get_message(
             task.channel_id,
             task.message_id,
-            callback=get_message_callback
+            callback=lambda msg, error: get_message_callback(msg) if not error else None
         )
     
     def is_task_already_present(self, task: UpdaterTask) -> bool:
@@ -1562,11 +1263,10 @@ class AutoUpdater:
             self.logger.error(f"Failed to get timeout: {format_exc_only(e)}")
             return int(DEFAULT_AUTOUPDATE_TIMEOUT)
     
-    def force_update_check(self):
+    def force_update_checkk(self):
         """Принудительно запускает проверку обновлений"""
         self.logger.info("Forced update check was requested.")
         self.forced_update_check = True
-        self.update_event.set()  # Пробуждаем поток немедленно
 
 
 # ==================== Вспомогательные функции AutoUpdater ====================
@@ -1575,7 +1275,7 @@ def download_and_install_plugin(message, plugin_task: UpdaterTask, max_retries: 
     if not message or not hasattr(message, 'media'):
         logger.error(f"Invalid message for plugin {plugin_task.plugin_id}")
         if show_notifications:
-            _bulletin("error", f"Invalid message for {plugin_task.plugin_id}")
+            InnerBulletinHelper("MSLib").show_error(f"Invalid message for {plugin_task.plugin_id}")
         return
     
     media = message.media
@@ -2007,152 +1707,15 @@ class UI:
         builder.show()
 
 
-# ==================== FileSystem Helpers ====================
-class FileSystem:
-    """Утилиты для работы с файловой системой"""
-    
-    File = File
-    
-    @classmethod
-    def basedir(cls, *path: str) -> str:
-        """Возвращает путь к директории плагинов"""
-        if not PLUGINS_DIRECTORY:
-            raise RuntimeError("PLUGINS_DIRECTORY not initialized")
-        
-        if path:
-            return os.path.join(PLUGINS_DIRECTORY, *path)
-        return PLUGINS_DIRECTORY
-    
-    @classmethod
-    def cachedir(cls, *path: str) -> str:
-        """Возвращает путь к директории кеша"""
-        if not CACHE_DIRECTORY:
-            raise RuntimeError("CACHE_DIRECTORY not initialized")
-        
-        if path:
-            return os.path.join(CACHE_DIRECTORY, *path)
-        return CACHE_DIRECTORY
-    
-    @classmethod
-    def get_file_content(cls, file_path: str, mode: str = "rb") -> Union[bytes, str]:
-        """Читает содержимое файла"""
-        with open(file_path, mode) as f:
-            return f.read()
-    
-    @classmethod
-    def write_file(cls, file_path: str, content: Union[bytes, str], mode: str = "wb"):
-        """Записывает содержимое в файл"""
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, mode) as f:
-            f.write(content)
-    
-    @classmethod
-    def delete_file(cls, file_path: str):
-        """Удаляет файл"""
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-
-# ==================== Spinner Alert Dialog ====================
-class SpinnerAlertDialog:
-    """Диалог с индикатором загрузки"""
-    
-    def __init__(self, text: Optional[str] = None):
-        from org.telegram.ui.Components import LineProgressView
-        
-        self.text = text or DEFAULT_SPINNER_TEXT
-        self.alert_builder = None
-        self.alert_dialog = None
-        self._shown = False
-    
-    def show(self):
-        """Показывает диалог"""
-        if self._shown:
-            return
-        
-        @run_on_ui_thread
-        def _show():
-            from org.telegram.ui.Components import LineProgressView
-            
-            fragment = get_last_fragment()
-            if not fragment:
-                return
-            
-            activity = fragment.getParentActivity()
-            if not activity:
-                return
-            
-            resources_provider = fragment.getResourceProvider()
-            
-            self.alert_builder = AlertDialogBuilder(activity, resources_provider)
-            
-            # Создаем layout
-            container = LinearLayout(activity)
-            container.setOrientation(LinearLayout.VERTICAL)
-            container.setPadding(
-                AndroidUtilities.dp(24),
-                AndroidUtilities.dp(16),
-                AndroidUtilities.dp(24),
-                AndroidUtilities.dp(16)
-            )
-            
-            # Текст
-            textView = TextView(activity)
-            textView.setText(self.text)
-            textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16)
-            textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resources_provider))
-            textView.setGravity(Gravity.CENTER)
-            container.addView(textView)
-            
-            # Прогресс бар
-            progress = LineProgressView(activity)
-            progress.setProgressColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resources_provider))
-            container.addView(progress, LinearLayout.LayoutParams(-1, AndroidUtilities.dp(4)))
-            progress.setPadding(0, AndroidUtilities.dp(16), 0, 0)
-            
-            self.alert_builder.setView(container)
-            self.alert_dialog = self.alert_builder.create()
-            self.alert_dialog.setCanceledOnTouchOutside(False)
-            self.alert_dialog.show()
-        
-        _show()
-        self._shown = True
-    
-    def hide(self):
-        """Скрывает диалог"""
-        if not self._shown:
-            return
-        
-        @run_on_ui_thread
-        def _hide():
-            if self.alert_dialog:
-                try:
-                    self.alert_dialog.dismiss()
-                except:
-                    pass
-        
-        _hide()
-        self._shown = False
-    
-    def __enter__(self):
-        """Context manager entry"""
-        self.show()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
-        self.hide()
-        return False
-
-
 # ==================== Интегрированные плагины ====================
 
 # 1. HashTagsFix - открытие "Этот чат" вместо "Публичные посты" в хештегах
 class HashTagsFixHook(MethodHook):
-    def __init__(self, plugin_instance):
-        self.plugin = plugin_instance
-    
     def replace_hooked_method(self, param):
+        # Проверяем настройку перед выполнением
+        if MSLib_instance and not MSLib_instance.get_setting("enable_hashtags_fix", False):
+            return  # Настройка выключена - пропускаем
+        
         try:
             if not self.plugin.get_setting("enable_hashtags_fix", False):
                 return
@@ -2317,34 +1880,43 @@ class HashTagsFixHook(MethodHook):
 
 # 2. ArticleViewerFix - отключение свайпа закрытия в браузере
 class ArticleViewerFixHook(MethodHook):
-    def __init__(self, plugin_instance):
-        self.plugin = plugin_instance
-    
     def before_hooked_method(self, param):
-        if not self.plugin.get_setting("enable_article_viewer_fix", False):
-            return
+        # Проверяем настройку перед выполнением
+        if MSLib_instance and not MSLib_instance.get_setting("enable_article_viewer_fix", False):
+            return  # Настройка выключена - пропускаем
+        
         param.setResult(False)
 
 
 # 3. NoCallConfirmation - убирает подтверждение звонка
 class NoCallConfirmationHook(MethodHook):
-    def __init__(self, plugin_instance):
-        self.plugin = plugin_instance
-    
     def before_hooked_method(self, param):
-        if self.plugin.get_setting("enable_no_call_confirmation", False):
-            param.args[6] = True
+        # Проверяем настройку перед выполнением
+        if MSLib_instance and not MSLib_instance.get_setting("enable_no_call_confirmation", False):
+            return  # Настройка выключена - пропускаем
+        
+        param.args[6] = True
 
 
 # 4. OldBottomForward - возвращает старый диалог пересылки
 class OldBottomForwardHook(MethodHook):
-    def __init__(self, plugin_instance):
-        self.plugin = plugin_instance
-    
     def before_hooked_method(self, param):
-        if not self.plugin.get_setting("enable_old_bottom_forward", False):
-            return
+        # Проверяем настройку перед выполнением
+        if MSLib_instance and not MSLib_instance.get_setting("enable_old_bottom_forward", False):
+            return  # Настройка выключена - пропускаем
+        
         param.args[0] = True
+
+
+# ==================== Singleton metaclass ====================
+class SingletonMeta(type):
+    """Метакласс для создания Singleton"""
+    _instances = {}
+    
+    def __call__(cls, *args, **kwargs):
+        if cls not in cls._instances:
+            cls._instances[cls] = super().__call__(*args, **kwargs)
+        return cls._instances[cls]
 
 
 # ==================== Mixin класс для плагинов ====================
@@ -2473,9 +2045,6 @@ MSLib_instance: Optional['MSLib'] = None
 class MSLib(BasePlugin):
     strings = {
         "en": {
-            "commands_header": "Commands",
-            "command_prefix_label": "Command prefix",
-            "command_prefix_hint": "Symbol or text to identify commands (default: .)",
             "autoupdater_header": "AutoUpdater",
             "enable_autoupdater": "Enable AutoUpdater",
             "autoupdater_hint": "Automatically check for plugin updates",
@@ -2493,15 +2062,6 @@ class MSLib(BasePlugin):
             "no_call_confirmation_hint": "Skip call confirmation dialog",
             "old_bottom_forward": "Old Bottom Forward",
             "old_bottom_forward_hint": "Brings back old forward dialog for the bottom button",
-            # Уведомления интегрированных плагинов
-            "hashtags_fix_enabled": "HashTags Fix enabled",
-            "hashtags_fix_disabled": "HashTags Fix disabled",
-            "article_viewer_fix_enabled": "Article Viewer Fix enabled",
-            "article_viewer_fix_disabled": "Article Viewer Fix disabled",
-            "no_call_confirmation_enabled": "No Call Confirmation enabled",
-            "no_call_confirmation_disabled": "No Call Confirmation disabled",
-            "old_bottom_forward_enabled": "Old Bottom Forward enabled",
-            "old_bottom_forward_disabled": "Old Bottom Forward disabled",
             "dev_header": "Developer",
             "debug_mode_title": "Debug mode",
             "debug_mode_hint": "Enables detailed logging for troubleshooting",
@@ -2509,9 +2069,6 @@ class MSLib(BasePlugin):
             "unloaded": "MSLib unloaded.",
         },
         "ru": {
-            "commands_header": "Команды",
-            "command_prefix_label": "Префикс команд",
-            "command_prefix_hint": "Символ или текст для распознавания команд (по умолчанию: .)",
             "autoupdater_header": "Автообновление",
             "enable_autoupdater": "Включить автообновление",
             "autoupdater_hint": "Автоматически проверять обновления плагинов",
@@ -2529,15 +2086,6 @@ class MSLib(BasePlugin):
             "no_call_confirmation_hint": "Убрать диалог подтверждения при звонке",
             "old_bottom_forward": "Старая пересылка",
             "old_bottom_forward_hint": "Возвращает привычное открытие диалогов при нажатии на нижнюю кнопку \"Переслать\"",
-            # Уведомления интегрированных плагинов
-            "hashtags_fix_enabled": "Исправление хештегов включено",
-            "hashtags_fix_disabled": "Исправление хештегов выключено",
-            "article_viewer_fix_enabled": "Исправление просмотра статей включено",
-            "article_viewer_fix_disabled": "Исправление просмотра статей выключено",
-            "no_call_confirmation_enabled": "Без подтверждения звонка включено",
-            "no_call_confirmation_disabled": "Без подтверждения звонка выключено",
-            "old_bottom_forward_enabled": "Старая пересылка включена",
-            "old_bottom_forward_disabled": "Старая пересылка выключена",
             "dev_header": "Разработчик",
             "debug_mode_title": "Режим отладки",
             "debug_mode_hint": "Включает подробное логирование для диагностики",
@@ -2548,24 +2096,13 @@ class MSLib(BasePlugin):
     
     def on_plugin_load(self):
         """Вызывается при загрузке плагина"""
-        global autoupdater, MSLib_instance, command_manager, companion
+        global autoupdater, MSLib_instance
         
         # Сохраняем экземпляр для доступа из других мест
         MSLib_instance = self
         
         # Инициализация констант
         _init_constants()
-        
-        # Инициализация companion для хранения данных между перезагрузками
-        companion = Companion()
-        companion.initialize()
-        logger.info("Companion initialized")
-        
-        # Инициализация CommandManager
-        command_manager = CommandManager()
-        command_manager.mark_not_temporal()
-        command_manager.load_pending_commands()
-        logger.info("CommandManager initialized")
         
         logger.info(localise("loaded"))
         self.log("MSLib initialized")
@@ -2586,64 +2123,58 @@ class MSLib(BasePlugin):
         self._setup_integrated_plugins()
     
     def _setup_integrated_plugins(self):
-        """Регистрация всех встроенных плагинов (хуки сами проверяют настройки)"""
+        """Регистрация всех интегрированных плагинов (хуки проверяют настройки сами)"""
         try:
-            # 1. HashTags Fix - исправление поиска хэштегов
-            from java.lang import Class as JavaClass
+            # 1. HashTags Fix
+            from java.lang import String, Boolean
             chat_activity_class = ChatActivity.getClass()
-            method = chat_activity_class.getDeclaredMethod(
-                "openHashtagSearch", 
-                String.getClass(), Boolean.TYPE
-            )
-            self.hook_method(method, HashTagsFixHook(self))
-            
-            # 2. Article Viewer Fix - фикс просмотра статей
-            article_viewer_class = ArticleViewer.getClass()
-            method = article_viewer_class.getDeclaredMethod(
-                "shouldProcessUrl", String.getClass()
-            )
-            self.hook_method(method, ArticleViewerFixHook(self))
-            
-            # 3. No Call Confirmation - убирает подтверждение звонка
-            voip_activity_class = VoIPActivity.getClass()
-            method = voip_activity_class.getDeclaredMethod(
-                "initiateCall", 
-                Long.TYPE, Boolean.TYPE, Integer.TYPE, 
-                Integer.TYPE, Boolean.TYPE, Boolean.TYPE, Boolean.TYPE
-            )
-            self.hook_method(method, NoCallConfirmationHook(self))
-            
-            # 4. Old Bottom Forward - старый диалог пересылки
-            base_fragment_class = BaseFragment.getClass()
-            method = base_fragment_class.getDeclaredMethod(
-                "showDialog", Dialog.getClass(), Boolean.TYPE
-            )
-            self.hook_method(method, OldBottomForwardHook(self))
-            
-            logger.info("Integrated plugins hooks registered")
+            method = chat_activity_class.getDeclaredMethod("openHashtagSearch", String.getClass(), Boolean.TYPE)
+            self.hook_method(method, HashTagsFixHook())
+            logger.info("HashTags Fix hook registered")
         except Exception as e:
-            logger.error(f"Failed to setup integrated plugins: {e}")
-    
-    def _on_integrated_plugin_toggle(self, key: str, value: bool):
-        """Callback при изменении настройки интегрированного плагина (мгновенная активация)"""
-        plugin_name = key.replace("enable_", "")
-        status = "enabled" if value else "disabled"
-        level = "success" if value else "info"
+            logger.error(f"Failed to register HashTags Fix: {e}")
         
-        _bulletin(level, localise(f"{plugin_name}_{status}"))
+        try:
+            # 2. Article Viewer Fix
+            article_viewer_window_class = jclass("org.telegram.ui.ArticleViewer$WindowView")
+            method = article_viewer_window_class.getClass().getDeclaredMethod("handleTouchEvent", MotionEvent)
+            self.hook_method(method, ArticleViewerFixHook())
+            logger.info("Article Viewer Fix hook registered")
+        except Exception as e:
+            logger.error(f"Failed to register Article Viewer Fix: {e}")
+        
+        try:
+            # 3. No Call Confirmation
+            from org.telegram.ui.Components.voip import VoIPHelper
+            from android.app import Activity
+            voip_helper_class = VoIPHelper.getClass()
+            method = voip_helper_class.getDeclaredMethod(
+                "startCall",
+                TLRPC.User, Boolean.TYPE, Boolean.TYPE, 
+                Activity, TLRPC.UserFull, AccountInstance, Boolean.TYPE
+            )
+            self.hook_method(method, NoCallConfirmationHook())
+            logger.info("No Call Confirmation hook registered")
+        except Exception as e:
+            logger.error(f"Failed to register No Call Confirmation: {e}")
+        
+        try:
+            # 4. Old Bottom Forward
+            chat_activity_class = ChatActivity.getClass()
+            method = chat_activity_class.getDeclaredMethod("openForward", Boolean.TYPE)
+            self.hook_method(method, OldBottomForwardHook())
+            logger.info("Old Bottom Forward hook registered")
+        except Exception as e:
+            logger.error(f"Failed to register Old Bottom Forward: {e}")
+        
+        logger.info("Integrated plugins setup complete")
     
     def on_plugin_unload(self):
         """Вызывается при выгрузке плагина"""
-        global autoupdater, command_manager
+        global autoupdater
         
         logger.info(localise("unloaded"))
         self.log("MSLib unloaded")
-        
-        # Сохранение команд в companion для восстановления после перезагрузки
-        if command_manager:
-            command_manager.save_commands_as_pending()
-            command_manager.unregister_all()
-            logger.info("Commands saved to companion")
         
         # Остановка автообновления
         if autoupdater:
@@ -2666,16 +2197,20 @@ class MSLib(BasePlugin):
             logger.setLevel(logging.DEBUG if new_value else logging.INFO)
             logger.info(f"Debug mode: {new_value}, level: {logging.getLevelName(logger.level)}")
         
+        def toggle_plugin(plugin_name: str):
+            """Создаёт callback для переключения интегрированного плагина"""
+            def callback(value: bool):
+                logger.info(f"[TOGGLE] Plugin: {plugin_name}, Value: {value}")
+                
+                status = "enabled" if value else "disabled"
+                level = "success" if value else "info"
+                message = localise(f"{plugin_name}_{status}")
+                logger.info(f"[BULLETIN] Level: {level}, Message: {message}")
+                _bulletin(level, message)
+                logger.info("[TOGGLE] Complete - hook will check setting on next call")
+            return callback
+        
         return [
-            Header(text=localise("commands_header")),
-            Input(
-                key="command_prefix",
-                text=localise("command_prefix_label"),
-                subtext=localise("command_prefix_hint"),
-                default=".",
-                icon="msg_limit_stories"
-            ),
-            Divider(),
             Header(text=localise("autoupdater_header")),
             Switch(
                 key="enable_autoupdater",
@@ -2711,7 +2246,7 @@ class MSLib(BasePlugin):
                 subtext=localise("hashtags_fix_hint"),
                 default=False,
                 icon="msg_link",
-                on_change=lambda v: self._on_integrated_plugin_toggle("enable_hashtags_fix", v)
+                on_change=toggle_plugin("hashtags_fix")
             ),
             Switch(
                 key="enable_article_viewer_fix",
@@ -2719,7 +2254,7 @@ class MSLib(BasePlugin):
                 subtext=localise("article_viewer_fix_hint"),
                 default=False,
                 icon="msg_instant",
-                on_change=lambda v: self._on_integrated_plugin_toggle("enable_article_viewer_fix", v)
+                on_change=toggle_plugin("article_viewer_fix")
             ),
             Switch(
                 key="enable_no_call_confirmation",
@@ -2727,7 +2262,7 @@ class MSLib(BasePlugin):
                 subtext=localise("no_call_confirmation_hint"),
                 default=False,
                 icon="msg_calls",
-                on_change=lambda v: self._on_integrated_plugin_toggle("enable_no_call_confirmation", v)
+                on_change=toggle_plugin("no_call_confirmation")
             ),
             Switch(
                 key="enable_old_bottom_forward",
@@ -2735,7 +2270,7 @@ class MSLib(BasePlugin):
                 subtext=localise("old_bottom_forward_hint"),
                 default=False,
                 icon="msg_forward",
-                on_change=lambda v: self._on_integrated_plugin_toggle("enable_old_bottom_forward", v)
+                on_change=toggle_plugin("old_bottom_forward")
             ),
             Divider(),
             Header(text=localise("dev_header")),
@@ -2779,18 +2314,12 @@ __all__ = [
     
     # Система команд
     'Dispatcher',
-    'CommandManager',
     'Command',
     'ArgSpec',
     'create_command',
     'parse_args',
     'cast_arg',
     'smart_cast',
-    'command_manager',
-    
-    # Companion
-    'Companion',
-    'companion',
     
     # Исключения
     'CannotCastError',
@@ -2812,8 +2341,6 @@ __all__ = [
     
     # UI утилиты
     'UI',
-    'SpinnerAlertDialog',
-    'FileSystem',
     
     # Inline система
     'Inline',
@@ -2842,9 +2369,6 @@ __all__ = [
     'add_surrogates',
     'remove_surrogates',
     'localise',
-    'get_command_prefix',
-    'pluralization_string',
-    'runtime_exec',
     
     # Singleton
     'SingletonMeta',

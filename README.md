@@ -6,9 +6,9 @@
 
 [![Version](https://img.shields.io/badge/version-1.1.0--beta-blueviolet.svg)](https://github.com/Miracle-Studios/MSLib/releases)
 [![License](https://img.shields.io/badge/license-BSD%203--Clause-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/release/python-3119/)
-[![exteraGram](https://img.shields.io/badge/exteraGram-Community-0088cc.svg)](https://t.me/exteraGram)
-[![Telegram](https://img.shields.io/badge/Telegram-@MiracleStudios-0088cc.svg)](https://t.me/MiracleStudios)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776ab.svg)](https://www.python.org/downloads/release/python-3119/)
+[![exteraGram](https://img.shields.io/badge/exteraGram-Community-ff6600.svg)](https://t.me/exteraGram)
+[![Telegram](https://img.shields.io/badge/Telegram-@MiracleStudios-26a5e4.svg)](https://t.me/MiracleStudios)
 
 </div>
 
